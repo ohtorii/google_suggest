@@ -1,0 +1,145 @@
+/*google suggestを使用する秀丸マクロ。
+
+＊はじめに
+    google suggestで単語補完をします。
+    
+    
+＊インストール
+    下記2ファイルを秀丸エディタのマクロディレクトリにコピーしてください。
+        google_suggest.mac
+        google_suggest_sub.js
+    
+    最後に、google_suggest.macをキーアサインすればインストールは完了です。
+    
+＊連絡先
+    http://d.hatena.ne.jp/ohtorii/
+    http://d.hatena.ne.jp/ohtorii/20110212/1297486866
+*/
+
+$$old_searchbuffer = searchbuffer;
+##old_searchoption = searchoption;
+disabledraw;
+call Main;
+enabledraw;
+setsearch $$old_searchbuffer, ##old_searchoption;
+endmacro;
+
+#g_suggestion_num 		= 0;
+$g_suggestion_str[0] 	= "";
+
+Main:
+	if(rectselecting){
+		return false;
+	}
+	
+	#is_selectline = false;
+	if (!selecting) {
+		#is_selectline = true;
+		selectline;
+	}
+	$$text = gettext(seltopx, seltopy, selendx, selendy, true);
+	if(!strlen($$text)){
+		return false;
+	}
+
+	call GetSuggestString $$text;
+	if(! ##return){
+		return false;
+	}
+	if(#g_suggestion_num){
+		menuarray $g_suggestion_str, #g_suggestion_num;
+		if(0<result){
+			##index = result - 1;
+			begingroupundo;
+			insert($g_suggestion_str[##index]);
+			if(#is_selectline){
+				insert("\n");
+			}
+			endgroupundo;
+		}
+	}
+
+	return true;
+
+
+/*
+
+（入力）のびたの
+
+（出力）
+#g_suggestion_num 		= 2;
+#g_suggestion_str[0] 	= "のび太の 結婚前夜";
+#g_suggestion_str[1] 	= "のび太の くせになまいきだ";
+*/
+GetSuggestString:
+	$$text = $$1;
+	##old_hidemaru = hidemaruhandle(0);
+
+	openfile "/h";
+
+	##cur_hidemaru = hidemaruhandle(0);
+	insert $$text;
+
+	//「改行」があれば削除しておく
+	replaceallfast "\\n","",regular;
+
+	selectline;
+	call RunEncodeURL_UTF8;
+
+	selectline;
+	$$encode_text = gettext(seltopx, seltopy, selendx, selendy, false);
+	//備考："&hl=ja"はロケール指定っぽい。「つける・つけない」でgoogleが返してくる候補が変わります。
+	call HttpGet "http://google.com/complete/search?output=toolbar&q=" + $$encode_text + "&hl=ja";
+	$$xml_text = $$return;
+	//message($$xml_text);
+
+	selectall;
+	backspace;
+	insert $$xml_text;
+	gofiletop;
+
+	$$reg = "(?\\1)<suggestion data=\"([^\"]+)\"/>";
+	searchdown $$reg, nocasesense, regular;
+	##tmp_result = result;
+	while(##tmp_result){
+		$$text = gettext(seltopx, seltopy, selendx, selendy, true);
+		$g_suggestion_str[#g_suggestion_num] = $$text;
+		#g_suggestion_num 					 = #g_suggestion_num + 1;
+		finddown;
+		##tmp_result = result;
+	}
+
+	setactivehidemaru	##old_hidemaru;
+	closehidemaruforced ##cur_hidemaru;
+
+	return true;
+
+
+/*UTF8でURLエンコードを行う。
+（入力）のびたの
+（出力）%E3%81%AE%E3%81%B3%E3%81%9F%E3%81%AE
+*/
+RunEncodeURL_UTF8:
+	$$mod = currentmacrodirectory+"\\google_suggest_sub.js";
+	$$mod = "\"" + $$mod + "\"";
+	runex 	"cscript.exe //U //nologo " + $$mod, 1
+			,5,""
+			,6,""
+			,1,""
+			,2,currentmacrodirectory
+			,2,1,2;
+	return ;
+
+
+HttpGet:
+	// $$1 = URI
+	// $$return = ResponseText
+	#http = createobject("Msxml2.XMLHTTP");
+	if (!#http) #http = createobject("Microsoft.XMLHTTP");
+	if (!#http) return "";
+	callmethod #http, "Open", "GET", $$1, false;
+	callmethod #http, "Send";
+	$$response = getpropstr(#http, "ResponseText");
+	releaseobject #http;
+	return $$response;
+
